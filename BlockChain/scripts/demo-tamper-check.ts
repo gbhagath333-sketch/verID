@@ -1,104 +1,141 @@
+import "dotenv/config";
 import crypto from "node:crypto";
-import { artifacts, network } from "hardhat";
+import fs from "node:fs";
+import path from "node:path";
 import { ethers } from "ethers";
 
 function sha256(content: string): string {
   return crypto.createHash("sha256").update(content).digest("hex");
 }
 
-async function runForensicDemo() {
-  console.log("\n╔═══════════════════════════════════════════════════════════════════════════════╗");
-  console.log("║     VerID: BLOCKCHAIN TAMPER-PROOF VERIFICATION FORENSIC SIMULATOR            ║");
-  console.log("╚═══════════════════════════════════════════════════════════════════════════════╝\n");
+async function main() {
+  console.log("\n╔══════════════════════════════════════════════════════════════════════╗");
+  console.log("║        VerID — LIVE SEPOLIA TAMPER-PROOF VERIFICATION              ║");
+  console.log("╚══════════════════════════════════════════════════════════════════════╝\n");
 
-  // 1. Connect and Deploy Contract
-  const net = await network.connect();
-  const provider = new ethers.BrowserProvider(net.provider);
-  const universityIssuer = await provider.getSigner(0);
-  const employerVerifier = await provider.getSigner(1);
+  const rpcUrl = process.env.SEPOLIA_RPC_URL;
+  const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
 
-  const artifact = await artifacts.readArtifact("RecordVerification");
-  const factory = new ethers.ContractFactory(artifact.abi, artifact.bytecode, universityIssuer);
-  const contract = await factory.deploy();
-  await contract.waitForDeployment();
-  const contractAddress = await contract.getAddress();
+  if (!rpcUrl) throw new Error("SEPOLIA_RPC_URL is missing from .env");
+  if (!privateKey) throw new Error("DEPLOYER_PRIVATE_KEY is missing from .env");
 
-  console.log(`[1] 🏛️ Smart Contract Deployed: ${contractAddress}`);
-  console.log(`    Issuer Authority Address:    ${await universityIssuer.getAddress()}\n`);
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const signer = new ethers.Wallet(privateKey, provider);
 
-  // 2. Original Credential
-  const originalCertificate = 
+  const network = await provider.getNetwork();
+
+  if (Number(network.chainId) !== 11155111) {
+    throw new Error(`Wrong network. Expected Sepolia, got ${network.chainId}`);
+  }
+
+  const artifactPath = path.resolve(
+    "artifacts/contracts/RecordVerification.sol/RecordVerification.json"
+  );
+
+  const deploymentPath = path.resolve("deployment-info.json");
+
+  if (!fs.existsSync(artifactPath)) {
+    throw new Error("Contract artifact not found.");
+  }
+
+  if (!fs.existsSync(deploymentPath)) {
+    throw new Error("deployment-info.json not found.");
+  }
+
+  const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
+  const deployment = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
+
+  const contractAddress = deployment.contractAddress;
+
+  console.log(`[+] Connected to Ethereum Sepolia`);
+  console.log(`[+] Contract: ${contractAddress}`);
+  console.log(`[+] Issuer Wallet: ${await signer.getAddress()}\n`);
+
+  const contract = new ethers.Contract(
+    contractAddress,
+    artifact.abi,
+    signer
+  );
+
+  const originalCertificate =
 `==============================================
          OFFICIAL UNIVERSITY DEGREE
 ==============================================
-Recipient:       Harpreet Singh
+Recipient:       VerID Demo Student
 Degree:          B.S. in Computer Science & AI
 Honors:          Magna Cum Laude
 GPA:             3.85 / 4.00
 Graduation Date: October 7, 2026
-Accreditation:   AB-ET Certified
+Accreditation:   VerID Demo Authority
 ==============================================`;
 
-  const recordId = "CERT-STANFORD-2026-9812";
+  const recordId = `VERID-DEMO-${Date.now()}`;
   const originalHash = sha256(originalCertificate);
 
-  console.log("[2] 📄 Generating Original Certificate Fingerprint:");
-  console.log(`    Record ID:     ${recordId}`);
-  console.log(`    SHA-256 Hash:  ${originalHash}`);
-  console.log("    (Notice: The actual text/PDF is NEVER sent to the blockchain - only this 64-char hash)\n");
+  console.log("[1] 📄 ORIGINAL DOCUMENT");
+  console.log(`    Record ID:    ${recordId}`);
+  console.log(`    SHA-256:      ${originalHash}\n`);
 
-  // 3. Register on Blockchain
-  console.log("[3] ⛓️  Registering Document Fingerprint on Blockchain...");
-  const tx = await contract.connect(universityIssuer).registerRecord(recordId, originalHash);
-  const receipt = await tx.wait();
-  console.log(`    ✔ Block mined! Tx Hash: ${receipt?.hash}`);
+  console.log("[2] ⛓️  REGISTERING HASH ON SEPOLIA...");
 
-  const [, , storedIssuer, storedTime, exists] = await contract.getRecord(recordId);
-  const formattedDate = new Date(Number(storedTime) * 1000).toUTCString();
-  console.log(`    ✔ Verified on-chain record: Issuer=${storedIssuer}, Timestamp=${formattedDate}\n`);
+  const tx = await contract.registerRecord(recordId, originalHash);
+  console.log(`    Transaction: ${tx.hash}`);
 
-  // 4. Test Scenario A: Authentic Verification
-  console.log("───────────────────────────────────────────────────────────────────────────────");
-  console.log("   TEST A: Employer/Verifier tests the GENUINE Document");
-  console.log("───────────────────────────────────────────────────────────────────────────────");
-  const testAHash = sha256(originalCertificate);
-  const resultA = await contract.connect(employerVerifier).verifyRecord(recordId, testAHash);
+  await tx.wait();
 
-  console.log(`  Supplied Document Hash: ${testAHash}`);
-  console.log(`  Blockchain Stored Hash: ${originalHash}`);
-  if (resultA) {
-    console.log("  >>> RESULT: \x1b[32m✔ [AUTHENTIC / UNTAMPERED]\x1b[0m");
-    console.log("  Verification Verdict: Document is 100% genuine and matches institutional record.\n");
+  console.log("    ✅ Record permanently registered on Sepolia.\n");
+
+  console.log("──────────────────────────────────────────────────────────────────────");
+  console.log("   TEST A — GENUINE DOCUMENT");
+  console.log("──────────────────────────────────────────────────────────────────────");
+
+  const genuineHash = sha256(originalCertificate);
+  const genuineResult = await contract.verifyRecord(
+    recordId,
+    genuineHash
+  );
+
+  console.log(`    Submitted Hash: ${genuineHash}`);
+  console.log(`    Verification:   ${genuineResult}`);
+
+  if (genuineResult) {
+    console.log("    ✅ AUTHENTIC — DOCUMENT MATCHES BLOCKCHAIN RECORD\n");
   } else {
-    console.log("  >>> RESULT: \x1b[31m✖ [TAMPERED]\x1b[0m\n");
+    console.log("    ❌ ERROR — AUTHENTIC DOCUMENT REJECTED\n");
   }
 
-  // 5. Test Scenario B: Tampered Document (1 tiny character changed)
-  console.log("───────────────────────────────────────────────────────────────────────────────");
-  console.log("   TEST B: Attacker forges the document (changes GPA from '3.85' to '4.00')");
-  console.log("───────────────────────────────────────────────────────────────────────────────");
-  const tamperedCertificate = originalCertificate.replace("GPA:             3.85 / 4.00", "GPA:             4.00 / 4.00");
+  console.log("──────────────────────────────────────────────────────────────────────");
+  console.log("   TEST B — TAMPERED DOCUMENT");
+  console.log("──────────────────────────────────────────────────────────────────────");
+
+  const tamperedCertificate = originalCertificate.replace(
+    "GPA:             3.85 / 4.00",
+    "GPA:             4.00 / 4.00"
+  );
+
   const tamperedHash = sha256(tamperedCertificate);
 
-  console.log(`  Original Hash:  ${originalHash}`);
-  console.log(`  Tampered Hash:  ${tamperedHash}`);
-  console.log("  Notice the Avalanche Effect: Editing just 3 digits completely flipped the entire hash!");
+  const tamperedResult = await contract.verifyRecord(
+    recordId,
+    tamperedHash
+  );
 
-  const resultB = await contract.connect(employerVerifier).verifyRecord(recordId, tamperedHash);
-  if (resultB) {
-    console.log("  >>> RESULT: \x1b[32m✔ [AUTHENTIC]\x1b[0m\n");
+  console.log(`    Original Hash: ${originalHash}`);
+  console.log(`    Tampered Hash: ${tamperedHash}`);
+  console.log(`    Verification:  ${tamperedResult}`);
+
+  if (!tamperedResult) {
+    console.log("    🚨 TAMPER DETECTED — DOCUMENT REJECTED\n");
   } else {
-    console.log("  >>> RESULT: \x1b[31m✖ [TAMPERED / FORGERY DETECTED]\x1b[0m");
-    console.log("  Verification Verdict: Immediate cryptographic rejection! The document was altered after issuance.\n");
+    console.log("    ❌ ERROR — TAMPERED DOCUMENT ACCEPTED\n");
   }
 
-  console.log("═══════════════════════════════════════════════════════════════════════════════");
-  console.log("   💡 WHY THIS STANDS OUT TO HACKATHON JUDGES:");
-  console.log("   1. Zero Storage Cost: Blockchain stores 32 bytes of hash, not heavy megabyte files.");
-  console.log("   2. Complete Privacy: Sensitive document content stays strictly on the client.");
-  console.log("   3. Mathematical Certainty: 1-character modification is 100% mathematically detectable.");
-  console.log("   4. Non-Repudiation: Only the issuing wallet address can anchor the initial record.");
-  console.log("═══════════════════════════════════════════════════════════════════════════════\n");
+  console.log("══════════════════════════════════════════════════════════════════════");
+  console.log("                    🎯 VERID DEMO COMPLETE");
+  console.log("══════════════════════════════════════════════════════════════════════\n");
 }
 
-runForensicDemo().catch(console.error);
+main().catch((error) => {
+  console.error("\n❌ Demo failed:", error);
+  process.exitCode = 1;
+});

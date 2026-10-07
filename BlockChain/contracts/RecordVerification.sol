@@ -9,6 +9,13 @@ pragma solidity ^0.8.34;
 contract RecordVerification {
     // Structure holding record details
   
+  struct Record {
+        string recordId;
+        string documentHash;
+        address issuer;
+        uint256 timestamp;
+        bool exists;
+    }
 
     // Mapping to store records by unique record ID
     mapping(string => Record) private records;

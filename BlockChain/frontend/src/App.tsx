@@ -1,73 +1,109 @@
 import { useState } from "react";
-import { ethers } from "ethers";
-import {
-  CONTRACT_ADDRESS,
-  CONTRACT_ABI,
-} from "./blockchain/config";
 import "./App.css";
 
-async function sha256(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
+const API_URL = "http://localhost:3001";
 
-  return hashArray
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+async function registerCertificate(studentName: string, file: File) {
+  const formData = new FormData();
+  formData.append("studentName", studentName);
+  formData.append("certificate", file);
+
+  const response = await fetch(`${API_URL}/api/register`, {
+    method: "POST",
+    body: formData,
+  });
+
+  return response.json();
+}
+
+async function verifyCertificate(recordId: string, file: File) {
+  const formData = new FormData();
+  formData.append("recordId", recordId);
+  formData.append("certificate", file);
+
+  const response = await fetch(`${API_URL}/api/verify`, {
+    method: "POST",
+    body: formData,
+  });
+
+  return response.json();
 }
 
 function App() {
+  const [studentName, setStudentName] = useState("");
+  const [registerFile, setRegisterFile] = useState<File | null>(null);
   const [recordId, setRecordId] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [result, setResult] = useState("");
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [verifyFile, setVerifyFile] = useState<File | null>(null);
 
-  async function verifyDocument() {
-    if (!recordId || !file) {
-      setResult("error");
-      setMessage("Please enter a Record ID and select a document.");
+  const [registerMessage, setRegisterMessage] = useState("");
+  const [verifyMessage, setVerifyMessage] = useState("");
+
+  const [registerLoading, setRegisterLoading] = useState(false);
+  const [verifyLoading, setVerifyLoading] = useState(false);
+
+  async function handleRegister() {
+    if (!studentName || !registerFile) {
+      setRegisterMessage("Please enter the student name and select a certificate.");
       return;
     }
 
     try {
-      setLoading(true);
-      setResult("");
-      setMessage("");
+      setRegisterLoading(true);
+      setRegisterMessage("");
 
-      const hash = await sha256(file);
+      const data = await registerCertificate(studentName, registerFile);
 
-      const provider = new ethers.JsonRpcProvider(
-        "https://ethereum-sepolia-rpc.publicnode.com"
+      if (data.success) {
+        setRegisterMessage(
+          `✅ Certificate registered!\nRecord ID: ${data.recordId}`
+        );
+        setRecordId(data.recordId);
+      } else {
+        setRegisterMessage(`⚠️ ${data.error || "Registration failed."}`);
+      }
+    } catch (error) {
+      console.error(error);
+      setRegisterMessage(
+        "⚠️ Cannot connect to the VerID blockchain server."
       );
+    } finally {
+      setRegisterLoading(false);
+    }
+  }
 
-      const contract = new ethers.Contract(
-        CONTRACT_ADDRESS,
-        CONTRACT_ABI,
-        provider
-      );
+  async function handleVerify() {
+    if (!recordId || !verifyFile) {
+      setVerifyMessage("Please enter the Record ID and select the certificate.");
+      return;
+    }
 
-      const verified = await contract.verifyRecord(recordId, hash);
+    try {
+      setVerifyLoading(true);
+      setVerifyMessage("");
 
-      if (verified) {
-        setResult("authentic");
-        setMessage(
-          "Document verified successfully. It matches the blockchain record."
+      const data = await verifyCertificate(recordId, verifyFile);
+
+      if (data.verified) {
+        const student =
+          data.record?.recordId
+            ? "Blockchain record found"
+            : "Verified";
+
+        setVerifyMessage(
+          `✅ AUTHENTIC\n${student}\nRecord ID: ${data.record.recordId}`
         );
       } else {
-        setResult("tampered");
-        setMessage(
-          "The document does not match the blockchain record."
+        setVerifyMessage(
+          "🚨 TAMPER DETECTED\nThis certificate does not match the blockchain record."
         );
       }
     } catch (error) {
       console.error(error);
-      setResult("error");
-      setMessage(
-        "Verification failed. Check the Record ID and try again."
+      setVerifyMessage(
+        "⚠️ Cannot connect to the VerID blockchain server."
       );
     } finally {
-      setLoading(false);
+      setVerifyLoading(false);
     }
   }
 
@@ -93,46 +129,96 @@ function App() {
         </h1>
 
         <p>
-          Verify the authenticity of digital records using cryptographic
-          hashing and an immutable blockchain record.
+          Create tamper-proof certificate records and verify their
+          authenticity using SHA-256 and Ethereum blockchain technology.
         </p>
 
-        <div className="card">
-          <input
-            className="input"
-            type="text"
-            placeholder="Enter Record ID"
-            value={recordId}
-            onChange={(e) => setRecordId(e.target.value)}
-          />
+        <div className="forms">
+          <div className="card">
+            <h2>Register Certificate</h2>
 
-          <input
-            className="file"
-            type="file"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
+            <p className="card-description">
+              Register a certificate permanently on the blockchain.
+            </p>
 
-          <button
-            className="verify"
-            onClick={verifyDocument}
-            disabled={loading}
-          >
-            {loading
-              ? "Verifying on Blockchain..."
-              : "Verify Document"}
-          </button>
+            <input
+              className="input"
+              type="text"
+              placeholder="Student Name"
+              value={studentName}
+              onChange={(e) => setStudentName(e.target.value)}
+            />
 
-          {result && (
-            <div className={`result ${result}`}>
-              {result === "authentic" && "✅ AUTHENTIC"}
-              {result === "tampered" && "🚨 TAMPER DETECTED"}
-              {result === "error" && "⚠️ VERIFICATION ERROR"}
+            <input
+              className="file"
+              type="file"
+              onChange={(e) =>
+                setRegisterFile(e.target.files?.[0] ?? null)
+              }
+            />
 
-              <div style={{ marginTop: 8, fontWeight: 400 }}>
-                {message}
+            <button
+              className="verify"
+              onClick={handleRegister}
+              disabled={registerLoading}
+            >
+              {registerLoading
+                ? "Registering on Blockchain..."
+                : "Register Certificate"}
+            </button>
+
+            {registerMessage && (
+              <div className="result authentic">
+                {registerMessage}
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          <div className="card">
+            <h2>Verify Certificate</h2>
+
+            <p className="card-description">
+              Check whether a certificate matches its blockchain record.
+            </p>
+
+            <input
+              className="input"
+              type="text"
+              placeholder="Enter Record ID"
+              value={recordId}
+              onChange={(e) => setRecordId(e.target.value)}
+            />
+
+            <input
+              className="file"
+              type="file"
+              onChange={(e) =>
+                setVerifyFile(e.target.files?.[0] ?? null)
+              }
+            />
+
+            <button
+              className="verify"
+              onClick={handleVerify}
+              disabled={verifyLoading}
+            >
+              {verifyLoading
+                ? "Verifying on Blockchain..."
+                : "Verify Certificate"}
+            </button>
+
+            {verifyMessage && (
+              <div
+                className={`result ${
+                  verifyMessage.startsWith("✅")
+                    ? "authentic"
+                    : "tampered"
+                }`}
+              >
+                {verifyMessage}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="footer">

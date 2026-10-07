@@ -1,1 +1,11 @@
+==============================================
+         OFFICIAL UNIVERSITY DEGREE
+==============================================
+Recipient:       VerID Demo Student
+Degree:          B.S. in Computer Science & AI
+Honors:          Magna Cum Laude
+GPA:             3.85 / 4.00
+Graduation Date: October 7, 2026
+Accreditation:   VerID Demo Authority
+==============================================
 
